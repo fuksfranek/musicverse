@@ -1,0 +1,27 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-ink: #000000;
+  --color-paper: #ffffff;
+  --font-display: var(--font-display);
+  --font-sans: var(--font-sans);
+}
+
+html,
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  letter-spacing: -0.03em;
+  overscroll-behavior: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
