@@ -8,7 +8,7 @@ type ListeningOverlayProps = {
 };
 
 const chromeLabel =
-  "font-sans text-[12px] sm:text-[13px] font-semibold uppercase tracking-[0.12em] text-black/72 select-none";
+  "font-sans text-[10px] sm:text-[11px] font-semibold uppercase tracking-[0.12em] text-black/72 select-none";
 
 const chromeTextButton =
   "pointer-events-auto cursor-pointer leading-none transition-colors duration-150 hover:text-black";
