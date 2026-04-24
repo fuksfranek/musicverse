@@ -4,6 +4,17 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import gsap from "gsap";
 
 import { mapHoldToPortalProgress } from "@/lib/portal/portalHoldEasing";
+import {
+  animateListeningMusicProgress,
+  primeMusicversumAudio,
+  restartListeningMusicFromZero,
+  setListeningMusicProgress,
+  setListeningMusicPlaying,
+  startListeningCloseHoldSound,
+  startListeningEntryScratchHoldSound,
+  stopListeningMusic,
+  type PressBoundSound,
+} from "@/lib/sound/musicversumSfx";
 import { tracks } from "@/lib/tracks";
 import { usePullInput } from "@/lib/usePullInput";
 import { useVinylControls } from "@/lib/useVinylControls";
@@ -11,6 +22,7 @@ import { usePortalTrigger } from "@/lib/usePortalTrigger";
 import ChromeFrame from "@/components/ui/ChromeFrame";
 import GooeyText from "@/components/ui/GooeyText";
 import ListeningOverlay from "@/components/ui/ListeningOverlay";
+import CreaturaCanvas from "@/components/listening/CreaturaCanvas";
 import VinylCanvas from "@/components/vinyl/VinylCanvas";
 import PortalCanvas from "@/components/vinyl/PortalCanvas";
 import Vinyl, {
@@ -50,6 +62,8 @@ const FLIGHT = {
 };
 
 const TEXT_TRANSITION_DURATION = 0.6;
+const LISTENING_MUSIC_ENTRY_START_PROGRESS = 0.09;
+const LISTENING_MUSIC_ENTRY_HOLD_TARGET_PROGRESS = 0.68;
 
 type PullState = "idle" | "pulling" | "releasing" | "flight";
 type Mode =
@@ -113,6 +127,9 @@ export default function Player() {
   const browseChromeRef = useRef<HTMLDivElement>(null);
   const browseTextRef = useRef<HTMLDivElement>(null);
 
+  const listeningCloseHoldSoundRef = useRef<PressBoundSound | null>(null);
+  const listeningEntryScratchSoundRef = useRef<PressBoundSound | null>(null);
+
   const controls = useVinylControls();
   const { portal } = controls;
 
@@ -123,6 +140,14 @@ export default function Player() {
   useEffect(() => {
     modeRef.current = mode;
   }, [mode]);
+
+  useEffect(() => {
+    void primeMusicversumAudio();
+    const primeOnFirstPointer = () => void primeMusicversumAudio();
+    document.addEventListener("pointerdown", primeOnFirstPointer, { once: true });
+    return () =>
+      document.removeEventListener("pointerdown", primeOnFirstPointer);
+  }, []);
 
   useEffect(() => {
     if (!isPlaying) return;
@@ -293,6 +318,16 @@ export default function Player() {
     gsap.killTweensOf(chargeProgressRef);
   }, [portalDriver]);
 
+  const stopListeningCloseHoldSound = useCallback((fadeMs?: number) => {
+    listeningCloseHoldSoundRef.current?.stop(fadeMs);
+    listeningCloseHoldSoundRef.current = null;
+  }, []);
+
+  const stopListeningEntryScratchSound = useCallback((fadeMs?: number) => {
+    listeningEntryScratchSoundRef.current?.stop(fadeMs);
+    listeningEntryScratchSoundRef.current = null;
+  }, []);
+
   const cancelCharge = useCallback(() => {
     killPortalTweens();
     const from = portalDriver.v;
@@ -303,10 +338,15 @@ export default function Player() {
       ease: "power3.out",
       onUpdate: () => {
         portalProgressRef.current = portalDriver.v;
+        setListeningMusicProgress(
+          portalDriver.v * LISTENING_MUSIC_ENTRY_HOLD_TARGET_PROGRESS,
+        );
       },
       onComplete: () => {
         portalDriver.v = 0;
         portalProgressRef.current = 0;
+        setListeningMusicProgress(0);
+        stopListeningMusic(0);
         if (modeRef.current === "charging") setMode("browse");
       },
     });
@@ -327,10 +367,12 @@ export default function Player() {
       ease: "power3.out",
       onUpdate: () => {
         portalProgressRef.current = portalDriver.v;
+        setListeningMusicProgress(portalDriver.v);
       },
       onComplete: () => {
         portalDriver.v = 1;
         portalProgressRef.current = 1;
+        setListeningMusicProgress(1);
         if (modeRef.current === "exit-charging") setMode("listening");
       },
     });
@@ -346,6 +388,10 @@ export default function Player() {
     portalDriver.v = 1;
     portalProgressRef.current = 1;
     chargeProgressRef.current = 0;
+    animateListeningMusicProgress(
+      1,
+      reducedMotion ? 0 : portal.commitFlip.duration * 1000,
+    );
     if (reducedMotion) {
       setMode("listening");
       lockRef.current = false;
@@ -353,9 +399,10 @@ export default function Player() {
     }
     lockRef.current = true;
     setMode("commit-flip");
-  }, [killPortalTweens, portalDriver, reducedMotion]);
+  }, [killPortalTweens, portal.commitFlip.duration, portalDriver, reducedMotion]);
 
   const handleCommitFlipComplete = useCallback(() => {
+    setListeningMusicProgress(1);
     setMode("listening");
     lockRef.current = false;
   }, []);
@@ -372,6 +419,8 @@ export default function Player() {
     if (reduced) {
       portalDriver.v = 0;
       portalProgressRef.current = 0;
+      setListeningMusicProgress(0);
+      stopListeningMusic(0);
       setMode("browse");
       lockRef.current = false;
       return;
@@ -383,10 +432,13 @@ export default function Player() {
       ease: portal.diveEaseOut,
       onUpdate: () => {
         portalProgressRef.current = portalDriver.v;
+        setListeningMusicProgress(portalDriver.v);
       },
       onComplete: () => {
         portalDriver.v = 0;
         portalProgressRef.current = 0;
+        setListeningMusicProgress(0);
+        stopListeningMusic(0);
         lockRef.current = false;
         setMode("browse");
       },
@@ -399,6 +451,11 @@ export default function Player() {
       modeRef.current !== "listening" || stateRef.current === "flight",
     onChargeStart: () => {
       killPortalTweens();
+      setListeningMusicProgress(1);
+      stopListeningCloseHoldSound(0);
+      listeningCloseHoldSoundRef.current = startListeningCloseHoldSound({
+        reducedMotion,
+      });
       setMode("exit-charging");
     },
     onChargeTick: (p01) => {
@@ -407,11 +464,14 @@ export default function Player() {
       const v = 1 - eased;
       portalDriver.v = v;
       portalProgressRef.current = v;
+      setListeningMusicProgress(v);
     },
     onCancel: () => {
+      stopListeningCloseHoldSound();
       cancelExitCharge();
     },
     onCommit: () => {
+      stopListeningCloseHoldSound();
       diveOut();
     },
   });
@@ -445,7 +505,16 @@ export default function Player() {
     holdMs: portal.holdMs,
     isBlocked: () => modeRef.current !== "browse" || stateRef.current === "flight",
     onChargeStart: () => {
+      stopListeningEntryScratchSound(0);
+      listeningEntryScratchSoundRef.current = startListeningEntryScratchHoldSound({
+        reducedMotion,
+      });
       killPortalTweens();
+      stopListeningMusic(0);
+      restartListeningMusicFromZero(
+        isPlaying,
+        LISTENING_MUSIC_ENTRY_START_PROGRESS,
+      );
       setPortalSeed((s) => s + 1);
       setMode("charging");
     },
@@ -454,11 +523,19 @@ export default function Player() {
       chargeProgressRef.current = eased;
       portalDriver.v = eased;
       portalProgressRef.current = eased;
+      setListeningMusicProgress(
+        LISTENING_MUSIC_ENTRY_START_PROGRESS +
+          eased *
+            (LISTENING_MUSIC_ENTRY_HOLD_TARGET_PROGRESS -
+              LISTENING_MUSIC_ENTRY_START_PROGRESS),
+      );
     },
     onCancel: () => {
+      stopListeningEntryScratchSound();
       cancelCharge();
     },
     onCommit: () => {
+      stopListeningEntryScratchSound();
       commitToListening();
     },
   });
@@ -470,8 +547,24 @@ export default function Player() {
     ) {
       return;
     }
+    stopListeningCloseHoldSound();
     diveOut();
-  }, [diveOut]);
+  }, [diveOut, stopListeningCloseHoldSound]);
+
+  useEffect(
+    () => () => {
+      stopListeningCloseHoldSound(0);
+      stopListeningEntryScratchSound(0);
+      stopListeningMusic(0);
+    },
+    [stopListeningCloseHoldSound, stopListeningEntryScratchSound],
+  );
+
+  useEffect(() => {
+    if (mode !== "browse") {
+      setListeningMusicPlaying(isPlaying);
+    }
+  }, [isPlaying, mode]);
 
   const onTogglePlay = useCallback(() => setIsPlaying((p) => !p), []);
 
@@ -481,7 +574,7 @@ export default function Player() {
     showListening || mode === "commit-flip" || mode === "diving-out";
 
   return (
-    <main className="relative h-dvh w-full">
+    <main className="musicversum-stage relative h-dvh w-full overflow-hidden">
       <div ref={browseChromeRef} className="opacity-100">
         <ChromeFrame
           isPlaying={isPlaying}
@@ -501,15 +594,32 @@ export default function Player() {
       </div>
 
       <div
+        className="pointer-events-none absolute inset-0 z-[12]"
+        style={{ mixBlendMode: "multiply" }}
+      >
+        <CreaturaCanvas
+          active={
+            mode === "listening" ||
+            mode === "commit-flip" ||
+            mode === "exit-charging" ||
+            mode === "charging" ||
+            mode === "diving-out"
+          }
+          intensityRef={portalProgressRef}
+          reducedMotion={reducedMotion}
+        />
+      </div>
+
+      <div
         ref={browseTextRef}
-        className="pointer-events-none absolute inset-0 z-[15] flex flex-col items-center justify-center gap-2 px-6 opacity-100"
+        className="pointer-events-none absolute inset-0 z-[16] flex flex-col items-center justify-center gap-3 px-5 opacity-100 sm:gap-4 sm:px-8"
       >
         <div
-          className="font-display font-medium italic text-black"
+          className="max-w-[92vw] text-center font-display font-medium italic text-black"
           style={{
-            fontSize: "clamp(52px, 9vw, 160px)",
-            lineHeight: 1,
-            letterSpacing: "-0.035em",
+            fontSize: "clamp(44px, 7.4vw, 116px)",
+            lineHeight: 0.94,
+            letterSpacing: 0,
           }}
         >
           <GooeyText text={track.title} duration={TEXT_TRANSITION_DURATION} />
@@ -518,17 +628,17 @@ export default function Player() {
         <div
           aria-hidden
           style={{
-            width: "min(48vh, 44vw, 560px)",
+            width: "min(43vh, 39vw, 500px)",
             aspectRatio: "1 / 1",
           }}
         />
 
         <div
-          className="font-display font-medium italic text-black"
+          className="max-w-[92vw] text-center font-display font-medium italic text-black"
           style={{
-            fontSize: "clamp(52px, 9vw, 160px)",
-            lineHeight: 1,
-            letterSpacing: "-0.035em",
+            fontSize: "clamp(40px, 6.8vw, 104px)",
+            lineHeight: 0.96,
+            letterSpacing: 0,
           }}
         >
           <GooeyText text={track.artist} duration={TEXT_TRANSITION_DURATION} />

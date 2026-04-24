@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
+
+import SuppressContextMenu from "@/components/ui/SuppressContextMenu";
+
 import "./globals.css";
 
 const sourceSerif = localFont({
@@ -42,7 +45,8 @@ export default function RootLayout({
       lang="en"
       className={`${sourceSerif.variable} ${switzerSemibold.variable} h-full antialiased`}
     >
-      <body className="h-full bg-white text-black font-sans">
+      <body className="h-full bg-[var(--color-paper)] text-black font-sans">
+        <SuppressContextMenu />
         {children}
       </body>
     </html>
